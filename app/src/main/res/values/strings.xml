@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">FacebookDados</string>
+    <string name="facebook_app_id">289613868164098</string>
+    <string name="title_activity_profileact">Profileact</string>
+    <string name="title_activity_profile">Profile</string>
+</resources>
