@@ -1,58 +1,51 @@
-import unittest
-from unittest.mock import patch, MagicMock
-from database_service import DatabaseService, ContratoMae
+import os
+from typing import Dict, Any
+from aws_lambda_context import LambdaContext
+from database_use_case import DatabaseUseCase
+from pagination import Pagination
+from aws_lambda.proxy import APIGatewayProxyEvent, APIGatewayProxyResult
 
-class TestDatabaseService(unittest.TestCase):
+def lambda_handler(event: APIGatewayProxyEvent, context: LambdaContext) -> APIGatewayProxyResult:
+    page = int(event.path_parameters.get('page', 1))
+    page_size = int(event.path_parameters.get('page_size', 10))
+    use_case = DatabaseUseCase()  # Supondo que você tenha uma classe DatabaseUseCase
+    resposta, total_registros = use_case.executar(page, page_size)
+    return _construir_resposta_paginada_sucesso(page, page_size, total_registros, resposta)
 
-    def test_initialization(self):
-        db_service = DatabaseService('localhost', 5432, 'mydb', 'user', 'password')
-        self.assertEqual(db_service.host, 'localhost')
-        self.assertEqual(db_service.port, 5432)
-        self.assertEqual(db_service.database, 'mydb')
-        self.assertEqual(db_service.user, 'user')
-        self.assertEqual(db_service.password, 'password')
-        self.assertEqual(db_service.nome_tabela, 'tbkx6002 ctnt_mae_fran_vare')
+def _construir_resposta_paginada_sucesso(page: int, page_size: int, total_registros: int, resposta: Any) -> Dict[str, Any]:
+    paginacao = Pagination(page, page_size, total_registros)
+    return {
+        'statusCode': 200,
+        'data': resposta,
+        'pagination': {
+            'links': paginacao.gerador_links(),  # Corrigi 'Links' para 'links'
+            'page': page,
+            'totalPages': paginacao.total_paginas,
+            'totalRecords': total_registros,
+            'pageSize': page_size
+        }
+    }
 
-    @patch('database_service.pg8000')
-    def test_connect_local_environment(self, mock_pg8000):
-        db_service = DatabaseService('localhost', 5432, 'mydb', 'user', 'password')
-        mock_pg8000.connect.return_value = MagicMock()
-        with patch.dict('os.environ', {'ENVIRONMENT': 'LOCAL'}):
-            db_service.connect()
-            mock_pg8000.connect.assert_called_once_with(
-                host='localhost', port=5432, database='mydb', user='user', password='password', ssl_context=None
-            )
+# Testes Unitários para a função lambda_handler
+class TestLambdaHandler(unittest.TestCase):
 
-    @patch('database_service.pg8000')
-    def test_connect_other_environment(self, mock_pg8000):
-        db_service = DatabaseService('example.com', None, 'mydb', 'user', 'password')
-        mock_pg8000.connect.return_value = MagicMock()
-        with patch.dict('os.environ', {'ENVIRONMENT': 'PRODUCTION'}):
-            db_service.connect()
-            mock_pg8000.connect.assert_called_once_with(
-                host='example.com', database='mydb', user='user', password='password'
-            )
+    @patch('lambda_function.DatabaseUseCase')
+    def test_lambda_handler(self, mock_use_case):
+        event = {
+            'path_parameters': {
+                'page': '1',
+                'page_size': '10'
+            }
+        }
+        context = MagicMock()
+        mock_use_case_instance = mock_use_case.return_value
+        mock_use_case_instance.executar.return_value = ([], 0)
 
-    @patch('database_service.DatabaseService.connect')
-    def test_consulta_dados(self, mock_connect):
-        db_service = DatabaseService('localhost', 5432, 'mydb', 'user', 'password')
-        mock_cursor = MagicMock()
-        mock_conn = MagicMock()
-        mock_cursor.description = [('num_ctrt_mae_fran_vare',), ('nom_fant_fran_ctrt_mae',), ('nom_situ_ctrt_mae',), ('nom_tipo_serv_ctnt_mae',), ('dat_hor_incu_atnt_mae',)]
-        mock_cursor.rowcount = 5
-        mock_cursor.fetchall.return_value = [(1, 'Fantasia', 'Ativo', 'Serviço', '2024-03-18 12:00:00')]*5
-        mock_conn.cursor.return_value = mock_cursor
-        mock_connect.return_value = mock_conn
+        response = lambda_handler(event, context)
 
-        result, total_registros = db_service.consulta_dados(1, 10)
-
-        self.assertEqual(total_registros, 5)
-        self.assertEqual(len(result), 5)
-        self.assertEqual(result[0]['num_ctrt_mae_fran_vare'], 1)
-        self.assertEqual(result[0]['nom_fant_fran_ctrt_mae'], 'Fantasia')
-        self.assertEqual(result[0]['nom_situ_ctrt_mae'], 'Ativo')
-        self.assertEqual(result[0]['nom_tipo_serv_ctnt_mae'], 'Serviço')
-        self.assertEqual(result[0]['dat_hor_incu_atnt_mae'], '2024-03-18 12:00:00')
-
-if __name__ == '__main__':
-    unittest.main()
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(response['pagination']['page'], 1)
+        self.assertEqual(response['pagination']['pageSize'], 10)
+        self.assertEqual(response['pagination']['totalRecords'], 0)
+        self.assertEqual(response['pagination']['totalPages'], 0)
+        self.assertEqual(response['data'], [])
